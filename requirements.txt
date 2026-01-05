@@ -1,7 +1,8 @@
 fastapi
 uvicorn
 supabase
-playwright
+supabase
+stripe
 jinja2
 markdown2
 python-dotenv

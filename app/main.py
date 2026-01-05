@@ -42,6 +42,15 @@ async def generate_asset(request: GenerateRequest, background_tasks: BackgroundT
     if not church_row:
         raise HTTPException(status_code=404, detail="Church not found for this sermon")
 
+    # GATE: Check Subscription
+    from app.services.revenue_service import RevenueService
+    revenue_service = RevenueService()
+    # We need to await if it's async, or run sync.
+    # supabase-py is sync, so our service is effectively sync logic wrapper 
+    # but defined as async def better practice for FastAPI calls usually.
+    # However since we are inside an async route, we must await.
+    await revenue_service.ensure_active_subscription(church_row.get("id"))
+
     transcript = sermon_row.get("transcript", "")
     # Note: We now allow missing transcript IF we have audio, but prompt builder logic prefers transcript.
     # We'll stick to requiring transcript or at least safe fallback.

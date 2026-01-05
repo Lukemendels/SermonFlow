@@ -1,9 +1,10 @@
 FROM python:3.11-slim
 
-# Install system dependencies for Playwright and general build
+# Install system dependencies for Audio Processing (ffmpeg)
 # python3-pip is included in slim, but we need some deps for building wheels sometimes.
 RUN apt-get update && apt-get install -y \
     curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -13,10 +14,6 @@ COPY requirements.txt .
 
 # Install Python Deps
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Playwright Browsers
-# This installs chromium and its system dependencies
-RUN playwright install --with-deps chromium
 
 # Copy App Code
 COPY . .
