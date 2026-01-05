@@ -109,3 +109,143 @@ async def generate_asset(request: GenerateRequest, background_tasks: BackgroundT
     }).eq("id", asset_id).execute()
 
     return {"status": "success", "asset_id": asset_id, "pdf_url": public_url}
+
+# --- Ingestion Pipeline ---
+
+from fastapi import UploadFile, File, Form, Body
+from app.services.ingestion_service import IngestionService
+from app.services.storage_service import StorageService
+from app.services.transcription_service import TranscriptionService
+import shutil
+import os
+
+# Pydantic model for JSON input
+class IngestRequest(BaseModel):
+    youtube_url: str
+    church_id: str
+
+def process_sermon_task(sermon_id: str, input_path: str, is_youtube: bool = False):
+    """
+    Background task to process the sermon:
+    1. Extract/Download Audio
+    2. Upload to Supabase
+    3. Transcribe with Gemini
+    4. Update DB
+    """
+    supabase = get_supabase()
+    ingestion = IngestionService()
+    storage = StorageService()
+    transcription = TranscriptionService()
+    
+    clean_audio_path = None
+    
+    try:
+        # Update status
+        supabase.table("sermons").update({"status": "processing_audio"}).eq("id", sermon_id).execute()
+        
+        # 1. Process Audio
+        if is_youtube:
+            clean_audio_path = ingestion.download_youtube_audio(input_path)
+        else:
+            # It's a file path
+            if input_path.lower().endswith(('.mp4', '.mov', '.avi', '.mkv')):
+                clean_audio_path = ingestion.extract_audio_from_video(input_path)
+            else:
+                # Assume audio, just validate
+                ingestion.validate_audio_file(input_path)
+                clean_audio_path = input_path
+        
+        # 2. Upload to Storage
+        filename = os.path.basename(clean_audio_path)
+        storage_path = f"{sermon_id}/{filename}"
+        public_url = storage.upload_file(clean_audio_path, storage_path)
+        
+        supabase.table("sermons").update({
+            "status": "processing_transcription",
+            "audio_url": public_url
+        }).eq("id", sermon_id).execute()
+        
+        # 3. Transcribe
+        transcript_text = transcription.generate_transcript(clean_audio_path)
+        
+        # 4. Finish
+        supabase.table("sermons").update({
+            "status": "completed",
+            "transcript": transcript_text
+        }).eq("id", sermon_id).execute()
+        
+    except Exception as e:
+        print(f"Error processing sermon {sermon_id}: {e}")
+        supabase.table("sermons").update({
+            "status": "failed",
+            "processing_error": str(e)
+        }).eq("id", sermon_id).execute()
+        
+    finally:
+        # Cleanup temp files
+        if clean_audio_path and os.path.exists(clean_audio_path):
+             os.remove(clean_audio_path)
+        # If we downloaded a youtube file or uploaded a temp file, ensure it's gone
+        # Note: input_path might be same as clean_audio_path if direct audio upload
+        if input_path and os.path.exists(input_path) and input_path != clean_audio_path:
+             os.remove(input_path)
+
+
+@app.post("/ingest")
+async def ingest_media(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(None),
+    church_id: str = Form(None),
+    body: IngestRequest = None, 
+    # Note: Body and Form together can be tricky in FastAPI. 
+    # Best practice: 2 separate endpoints or dependency injection.
+    # But instructions asked for one endpoint "Accept either file OR JSON".
+    # simpler to check logic inside.
+):
+    supabase = get_supabase()
+    
+    # 1. Determine Input Type
+    youtube_url = None
+    target_church_id = None
+    
+    if body:
+        youtube_url = body.youtube_url
+        target_church_id = body.church_id
+    elif file and church_id:
+        target_church_id = church_id
+    else:
+        # Fallback if mixed (e.g. JSON body passed to file endpoint often fails content-type, 
+        # but let's assume client sends correct Content-Type)
+        raise HTTPException(status_code=400, detail="Must provide either file upload with church_id OR JSON body with youtube_url and church_id")
+
+    if not target_church_id:
+        raise HTTPException(status_code=400, detail="church_id is required")
+
+    # 2. Create Initial Sermon Record
+    sermon_entry = {
+        "church_id": target_church_id,
+        "title": "New Import", # Can be updated later
+        "transcript": "", # Placeholder
+        "status": "queued"
+    }
+    res = supabase.table("sermons").insert(sermon_entry).execute()
+    if not res.data:
+         raise HTTPException(status_code=500, detail="Failed to create sermon record")
+    
+    sermon_id = res.data[0]['id']
+    
+    # 3. Handle Input & Queue Task
+    if youtube_url:
+        background_tasks.add_task(process_sermon_task, sermon_id, youtube_url, is_youtube=True)
+    else:
+        # Save uploaded file to temp
+        temp_dir = "/tmp/sermonflow_uploads"
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_path = os.path.join(temp_dir, f"{sermon_id}_{file.filename}")
+        
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        background_tasks.add_task(process_sermon_task, sermon_id, temp_path, is_youtube=False)
+
+    return {"status": "queued", "sermon_id": sermon_id}

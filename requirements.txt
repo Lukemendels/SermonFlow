@@ -7,3 +7,6 @@ markdown2
 python-dotenv
 pydantic
 google-genai>=1.56.0
+yt-dlp
+ffmpeg-python
+python-multipart

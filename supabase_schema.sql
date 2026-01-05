@@ -17,6 +17,9 @@ create table public.sermons (
   transcript text not null,
   title text, -- Optional but helpful
   series_title text, -- Optional but helpful for "Current Series" context
+  status text default 'pending_processing',
+  audio_url text,
+  processing_error text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
