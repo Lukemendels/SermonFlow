@@ -28,6 +28,16 @@ export async function middleware(request: NextRequest) {
 
     const { data: { session } } = await supabase.auth.getSession()
 
+    // Protect Admin Routes
+    if (request.nextUrl.pathname.startsWith('/admin')) {
+        const adminEmail = process.env.ADMIN_EMAIL
+        if (!session || session.user.email !== adminEmail) {
+            const url = request.nextUrl.clone()
+            url.pathname = '/login'
+            return NextResponse.redirect(url)
+        }
+    }
+
     // Protect Dashboard
     if (!session && request.nextUrl.pathname.startsWith('/dashboard')) {
         const url = request.nextUrl.clone()
@@ -48,6 +58,7 @@ export async function middleware(request: NextRequest) {
 export const config = {
     matcher: [
         '/dashboard/:path*',
+        '/admin/:path*',
         '/login',
         '/auth/callback'
     ],
