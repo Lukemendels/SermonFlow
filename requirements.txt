@@ -10,3 +10,5 @@ google-genai>=1.56.0
 yt-dlp
 ffmpeg-python
 python-multipart
+reportlab>=4.0.0
+httpx

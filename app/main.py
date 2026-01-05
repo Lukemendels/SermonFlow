@@ -23,11 +23,14 @@ class GenerateRequest(BaseModel):
 
 @app.post("/generate-asset")
 async def generate_asset(request: GenerateRequest, background_tasks: BackgroundTasks):
+    import httpx
+    import os
+    import tempfile
+
     # Retrieve Sermon & Church Data from Supabase
     supabase = get_supabase()
     
     # Fetch sermon with Joined Church Data
-    # Assuming "churches" is the foreign table name
     response = supabase.table("sermons").select("*, churches(*)").eq("id", request.sermon_id).execute()
     
     if not response.data:
@@ -40,15 +43,37 @@ async def generate_asset(request: GenerateRequest, background_tasks: BackgroundT
         raise HTTPException(status_code=404, detail="Church not found for this sermon")
 
     transcript = sermon_row.get("transcript", "")
-    if not transcript:
-         raise HTTPException(status_code=400, detail="Sermon has no transcript")
+    # Note: We now allow missing transcript IF we have audio, but prompt builder logic prefers transcript.
+    # We'll stick to requiring transcript or at least safe fallback.
+    
+    audio_url = sermon_row.get("audio_url")
+    temp_audio_path = None
+    
+    if audio_url:
+        try:
+            # Download audio to temp file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+                temp_audio_path = tmp_file.name
+                
+            # Use httpx to stream download
+            print(f"Downloading Audio: {audio_url}")
+            with httpx.Client() as client:
+                with client.stream("GET", audio_url) as r:
+                    r.raise_for_status()
+                    with open(temp_audio_path, "wb") as f:
+                        for chunk in r.iter_bytes():
+                            f.write(chunk)
+            print("Audio Downloaded")
+        except Exception as e:
+            print(f"Warning: Failed to download audio for context: {e}")
+            # Non-blocking, we proceed without audio if download fails
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                 os.remove(temp_audio_path)
+            temp_audio_path = None
 
     # Parse Profiles
-    # Assuming these fields are JSONB in Supabase, the pyton client returns them as Dicts naturally.
-    # We validate them via Pydantic.
     try:
         profile_data = church_row.get("deep_research_profile", {})
-        # Enrich profile with church name if not inside jsonb, or ensure consistency
         if "church_name" not in profile_data:
             profile_data["church_name"] = church_row.get("name", "Unknown Church")
             
@@ -57,19 +82,23 @@ async def generate_asset(request: GenerateRequest, background_tasks: BackgroundT
         branding_data = church_row.get("branding_assets", {})
         branding = BrandingAssets(**branding_data)
     except Exception as e:
+        if temp_audio_path: os.remove(temp_audio_path)
         raise HTTPException(status_code=500, detail=f"Data validation error: {str(e)}")
 
     # 1. Content Generation
     content_engine = ContentGenerator()
     try:
-        markdown_content = content_engine.generate(profile, transcript, request.asset_type)
+        # Pass audio path!
+        markdown_content = content_engine.generate(profile, transcript, request.asset_type, audio_path=temp_audio_path)
     except Exception as e:
+         if temp_audio_path: os.remove(temp_audio_path)
          raise HTTPException(status_code=500, detail=f"Content generation failed: {str(e)}")
-
-    # 2. Save Markdown Asset (Optional step, but good for history)
-    # instructions said: "Save Markdown to Supabase assets table immediately."
-    # We need an asset ID for the filename maybe?
     
+    # Cleanup audio immediately after generation
+    if temp_audio_path and os.path.exists(temp_audio_path):
+        os.remove(temp_audio_path)
+
+    # 2. Save Markdown Asset
     asset_entry = {
         "sermon_id": request.sermon_id,
         "type": request.asset_type,
@@ -77,17 +106,9 @@ async def generate_asset(request: GenerateRequest, background_tasks: BackgroundT
         "status": "processing"
     }
     asset_res = supabase.table("assets").insert(asset_entry).execute()
-    # Assuming we get an ID back
     asset_id = asset_res.data[0].get("id") if asset_res.data else str(uuid.uuid4())
 
     # 3. PDF Generation & Upload
-    # We can run this in background or sync. Instructions imply explicit flow. 
-    # Let's do it sync for simplicity unless requested otherwise, or use BackgroundTasks if latency is concern.
-    # Given "POST /generate-asset", usually users wait for result or get a job ID.
-    # "Return the PDF file" was V1. V2 implies "Upload ... Update assets table".
-    # So we act as an async trigger or wait-for-completion.
-    # I will do it synchronously to ensure errors are caught, as it's a "process" endpoint.
-    
     pdf_engine = PDFEngine()
     try:
         pdf_bytes = pdf_engine.generate_pdf(markdown_content, branding)
