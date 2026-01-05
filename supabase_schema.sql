@@ -68,7 +68,9 @@ create table public.onboarding_requests (
   church_name text,
   website text,
   denomination text,
-  social_links jsonb default '{}'::jsonb,
+  branding_assets jsonb not null default '{}'::jsonb,
+  subscription_status text default 'inactive',
+  stripe_customer_id text,
   status text default 'pending_research',
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
