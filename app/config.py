@@ -8,6 +8,9 @@ class Config:
     SUPABASE_KEY = os.getenv("SUPABASE_KEY")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+    STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
+    STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+    STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID")
 
     if not SUPABASE_URL:
         # In production this might log a warning, for now we raise to fail fast
