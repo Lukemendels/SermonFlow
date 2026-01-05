@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+.next/
+
+# Supabase
+supabase/.branches
+supabase/.temp
+
+# IDE
+.vscode/
+.idea/
+
+# Local
+*.local
+dist/
+build/

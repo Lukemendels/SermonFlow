@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+supabase
+playwright
+jinja2
+markdown2
+python-dotenv
+pydantic
+google-genai>=1.56.0

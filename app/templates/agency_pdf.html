@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/pydantic/paged.polyfill.js"></script>
+    <style>
+        :root {
+            --brand-primary: {{ branding.primary_color }};
+            --brand-secondary: {{ branding.secondary_color }};
+            --font-header: {{ branding.font_header }}, serif;
+            --font-body: {{ branding.font_body }}, sans-serif;
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            font-family: var(--font-header);
+            color: var(--brand-primary);
+        }
+
+        body {
+            font-family: var(--font-body);
+            font-size: 12pt;
+            line-height: 1.5;
+        }
+
+        @page {
+            size: A4;
+            margin: 20mm;
+
+            @top-center {
+                content: "SermonFlow Asset";
+                font-family: var(--font-header);
+                font-size: 9pt;
+                color: var(--brand-secondary);
+            }
+            
+            @bottom-right {
+                content: counter(page);
+                font-family: var(--font-body);
+                font-size: 9pt;
+            }
+        }
+    </style>
+    <script>
+        window.PagedConfig = {
+            auto: true,
+        };
+    </script>
+</head>
+<body class="prose max-w-none">
+    {{ content | safe }}
+</body>
+</html>
